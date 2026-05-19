@@ -144,6 +144,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--instruction-json", default=None,
                         help="read_sheets.py 출력 JSON 문자열 (Instruction 탭)")
+    parser.add_argument("--instruction-file", default=None,
+                        help="--instruction-json 대신 파일 경로로 전달")
     parser.add_argument("--find-placeholders", action="store_true",
                         help="플레이스홀더 탐색 모드")
     parser.add_argument("--cells-json", default=None,
@@ -180,11 +182,14 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         return
 
-    if not args.instruction_json:
-        print(json.dumps({"error": "--instruction-json 필요"}))
+    if args.instruction_file:
+        with open(args.instruction_file, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    elif args.instruction_json:
+        data = json.loads(args.instruction_json)
+    else:
+        print(json.dumps({"error": "--instruction-json 또는 --instruction-file 필요"}))
         sys.exit(1)
-
-    data = json.loads(args.instruction_json)
     rows = data.get("rows", [])
     result = build_mapping(rows)
     print(json.dumps(result, ensure_ascii=False))

@@ -139,8 +139,15 @@ PYTHONUTF8=1 python .claude/skills/variable-mapper/scripts/build_mapping.py \
 | `[서비스 기간]` | 초일 ~ 말일 | `2026/04/01 ~ 2026/04/30` |
 | `[서비스 공급가액]` | `Fixed![고정비]+Fixed![추가브랜드]` | 아래 **화폐 포맷 규칙** 적용 |
 | `[인보이스번호]` | `Client![별칭]-[인보이스청구년월]-Fixed-01` | `{client_row[별칭]}-{YYYYMM}-Fixed-01` |
+| `[계좌번호]` | Currency 조건부 계좌번호 | `fixed_row["Currency"] == "USD"` → `"064-177713-56-00027"`, 그 외(KRW) → `"064-177713-04-036"` |
 
 - 의존 관계가 있는 변수는 의존 대상을 먼저 계산한 후 사용한다.
+
+**I14 SWIFT CODE 조건부 쓰기:**
+
+`[계좌번호]` 변수 계산 후 Currency에 따라 I14 셀 값을 cells 딕셔너리에 추가한다:
+- `fixed_row["Currency"] == "USD"` → `cells["I14"] = "SWIFT CODE : IBKOKRSE"`
+- 그 외(KRW) → `cells["I14"] = ""` (빈 문자열로 기존 값 지움)
 
 #### 화폐 포맷 규칙 (simple/complex 공통 적용)
 
@@ -165,6 +172,7 @@ total = 고정비 + 추가브랜드  # 정수 그대로 저장
 플레이스홀더 탐색 결과에서 아래 변수명에 해당하는 셀 주소를 수집해둔다:
 - `[서비스 공급가액]`, `[부가가치세액]`, `[청구총액]`
 - 추가로 `H22` (=G20 수식 셀이지만 포맷 적용 필요)
+- 추가로 `C16` (=H25 수식 셀이지만 포맷 적용 필요: USD → `$#,##0.00`, KRW → `₩#,##0`)
 
 #### 3-4-C: 최종 cells 딕셔너리 구성
 
@@ -201,7 +209,7 @@ PYTHONUTF8=1 python .claude/skills/sheets-writer/scripts/batch_write_cells.py \
 
 - `--sheet-id`: STEP 3-3에서 확보한 `new_sheet_id` (정수)
 - `--format-cells`: 포맷 적용할 셀 주소 목록 (쉼표 구분)
-  - 플레이스홀더로 직접 쓴 금액 셀 + H22 (=G20 수식 셀)
+  - 플레이스홀더로 직접 쓴 금액 셀 + H22 (=G20 수식 셀) + C16 (=H25 수식 셀)
 - `--currency`: `fixed_row["Currency"]` 값 (KRW 또는 USD)
 
 ```bash

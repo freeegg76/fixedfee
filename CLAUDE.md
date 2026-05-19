@@ -57,7 +57,8 @@ Python 의존 패키지: `google-auth`, `google-api-python-client`, `google-auth
 
 ### STEP 0 — 귀속월 입력 수신 및 유효성 검증
 
-운영자에게 귀속월 입력 요청:
+프롬프트에 `YYYY/MM` 형식의 귀속월이 포함된 경우 그대로 사용한다 (작업 스케줄러 자동 실행 시).
+포함되지 않은 경우 운영자에게 입력 요청:
 
 ```
 서비스 귀속월을 입력하세요 (형식: YYYY/MM):
@@ -127,7 +128,7 @@ python .claude/skills/variable-mapper/scripts/build_mapping.py --instruction-jso
 
 → `variable_mapping` (딕셔너리, simple/complex 유형 포함)
 
-### STEP 3 — 고객사별 루프 처리
+### STEP 3 — 고객사별 병렬 처리
 
 START 로그 기록:
 ```bash
@@ -149,8 +150,14 @@ python .claude/skills/run-logger/scripts/write_log.py \
 **Fixed 탭 Key 컬럼 정제**: Key 값 끝에 `/`가 붙어 있는 경우 제거 후 사용
 - 예: `"1tPR4Tr-...MgD8/"` → `"1tPR4Tr-...MgD8"`
 
-**루프**: Client 탭 데이터 행마다 `invoice-writer` 서브에이전트 호출:
+---
 
+#### Phase 1 — 인보이스 탭 생성 (병렬)
+
+처리 대상 고객사 전체의 `invoice-writer` 서브에이전트를 **단일 응답에 묶어 동시 호출**한다.
+모든 호출이 완료될 때까지 기다린 후 결과를 수집한다.
+
+각 고객사 호출 형식:
 ```
 Task: .claude/agents/invoice-writer/AGENT.md 지침에 따라 아래 고객사의 인보이스 탭을 생성하라.
 
@@ -170,21 +177,21 @@ variable_mapping의 type이 "simple"인 변수는 client_row/fixed_row에서 직
 type이 "complex"인 변수는 description과 example을 참고하여 LLM이 직접 계산한다.
 ```
 
-각 호출 결과(`status`, `sheet_url`, `reason`)를 `results` 목록에 추가.
+모든 호출 결과(`status`, `sheet_url`, `new_sheet_id`, `reason`)를 `results` 목록에 수집한다.
 
-**invoice-writer가 `status == "success"`를 반환한 경우에만** 아래 메일 초안 생성을 진행한다.
+---
 
-#### 메일 초안 생성 (인보이스 성공 시)
+#### Phase 2 — PDF 내보내기 (병렬)
 
-**① PDF 내보내기**
+Phase 1에서 `status == "success"`를 반환한 고객사 전체의 PDF 내보내기를 **단일 응답에 묶어 동시 실행**한다.
 
-invoice-writer 반환값에서 `new_sheet_id` (복제된 탭의 정수 sheetId)를 받아 PDF를 내보낸다.
-
+각 고객사 파일명:
 ```
 pdf_filename = f"{client_row['별칭']} Fixed Fee Invoice {month_key}.pdf"
 pdf_path     = f"output/{pdf_filename}"
 ```
 
+각 고객사 실행 명령:
 ```bash
 PYTHONUTF8=1 GOOGLE_SERVICE_ACCOUNT_KEY="c:/Dev/Fixed Fee/credentials.json" \
 python .claude/skills/gmail-draft/scripts/export_pdf.py \
@@ -194,16 +201,19 @@ python .claude/skills/gmail-draft/scripts/export_pdf.py \
 ```
 
 - 실패 시 MAX_RETRY(1)회 재시도.
-- 재시도 후에도 실패하면: `run-logger` ERROR 기록, `email_draft: "error"` 표시 후 해당 고객사 메일 초안 생성 중단.
+- 재시도 후에도 실패하면: `run-logger` ERROR 기록, 해당 고객사 `email_draft: "error"` 표시 후 Phase 3에서 제외.
 
-**② 수신자 구성**
+---
 
-`email_rows`에서 현재 고객사 `회사코드`와 일치하는 행을 필터링한다.
+#### Phase 3 — 메일 초안 생성 (병렬)
+
+Phase 2에서 PDF 내보내기가 성공한 고객사 전체의 메일 초안을 **단일 응답에 묶어 동시 생성**한다.
+
+**수신자 구성**: `email_rows`에서 현재 고객사 `회사코드`와 일치하는 행을 필터링한다.
 - `구분 == "To"` 인 행의 `메일주소`를 쉼표로 결합 → `to_str`
 - `구분 == "CC"` 인 행의 `메일주소`를 쉼표로 결합 → `cc_str`
 
-**③ 메일 제목·본문 구성**
-
+**메일 제목·본문**:
 ```
 subject = f"[아마존_Invoice] {client_row['별칭']} Fixed Fee invoice {month_key}"
 body    = "안녕하세요 폴싯 빌링팀입니다. \n\n고정비 {month_key} invoice를 송부드립니다. \n\n폴싯 빌링팀 드림"
@@ -211,8 +221,7 @@ body    = "안녕하세요 폴싯 빌링팀입니다. \n\n고정비 {month_key} 
 
 (`month_key` = `YYYYMM` 형식, 예: `202605`)
 
-**④ Gmail 초안 저장 (PDF 첨부)**
-
+각 고객사 실행 명령:
 ```bash
 PYTHONUTF8=1 python .claude/skills/gmail-draft/scripts/create_draft.py \
   --to "{to_str}" \
