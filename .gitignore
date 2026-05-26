@@ -1,0 +1,16 @@
+# 인증 파일 (절대 커밋 금지)
+credentials.json
+gmail_token.json
+client_secret_*.json
+.claude/gmail_token.json
+.claude/settings.local.json
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 임시 파일
+output/tmp_*.json
+output/instruction_tmp.json
